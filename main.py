@@ -12,7 +12,7 @@ st.set_page_config(
 
 st.write("# Tufte: Automatic Generation of Visualizations using LLMS 📊")
 
-openai_key = os.getenv("OPENAI_API_KEY")
+openai_key = os.getenv("OPENAI_API_KEY") or st.secrets["OPENAI_API_KEY"]
 
 if not openai_key:
     st.sidebar.write("## Setup")
