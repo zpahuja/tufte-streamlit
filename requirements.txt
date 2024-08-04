@@ -1,2 +1,11 @@
-git+https://github.com/zpahuja/tufte.git
+altair
+ggplot
+matplotlib
+numpy
+openai
+pandas
+plotly
+pydantic
+seaborn
 streamlit
+git+https://github.com/zpahuja/tufte.git
