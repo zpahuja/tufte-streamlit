@@ -12,7 +12,19 @@ st.set_page_config(
 
 st.write("# Tufte: Automatic Generation of Visualizations using LLMS 📊")
 
-openai_key = os.getenv("OPENAI_API_KEY") or st.secrets["OPENAI_API_KEY"]
+# Initialize session state variables
+if 'summary' not in st.session_state:
+    st.session_state.summary = None
+if 'goals' not in st.session_state:
+    st.session_state.goals = None
+if 'selected_goal_index' not in st.session_state:
+    st.session_state.selected_goal_index = 0
+if 'visualizations' not in st.session_state:
+    st.session_state.visualizations = None
+if 'orc' not in st.session_state:
+    st.session_state.orc = None
+
+openai_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
 
 if not openai_key:
     st.sidebar.write("## Setup")
@@ -28,8 +40,6 @@ st.markdown(
 
 # Select a dataset
 if openai_key:
-    selected_dataset = None
-
     st.sidebar.write("### Choose a dataset")
 
     datasets = [
@@ -59,91 +69,104 @@ if openai_key:
             uploaded_file_path = os.path.join("data", uploaded_file.name)
             data.to_csv(uploaded_file_path, index=False)
 
-            selected_dataset = uploaded_file_path
+            st.session_state.selected_dataset = uploaded_file_path
 
             datasets.append({"label": file_name, "url": uploaded_file_path})
     else:
-        selected_dataset = datasets[[dataset["label"]
-                                     for dataset in datasets].index(selected_dataset_label)]["url"]
+        st.session_state.selected_dataset = datasets[[dataset["label"] for dataset in datasets].index(selected_dataset_label)]["url"]
 
-    if not selected_dataset:
+    if not st.session_state.get('selected_dataset'):
         st.info("To continue, select a dataset from the sidebar on the left or upload your own.")
 
-
-# Generate data summary
-if openai_key and selected_dataset:
+# Generate data summary and goals
+if openai_key and st.session_state.get('selected_dataset'):
     os.environ["OPENAI_API_KEY"] = openai_key
-    orc = Orchestrator()
+    
+    # Create a new Orchestrator instance only if it doesn't exist or if the dataset has changed
+    if st.session_state.orc is None or st.session_state.get('last_dataset') != st.session_state.selected_dataset:
+        st.session_state.orc = Orchestrator()
+        st.session_state.last_dataset = st.session_state.selected_dataset
+        # Reset summary and goals when dataset changes
+        st.session_state.summary = None
+        st.session_state.goals = None
+
+    # Only generate summary and goals if they don't exist
+    if st.session_state.summary is None:
+        st.session_state.summary = st.session_state.orc.summarize(st.session_state.selected_dataset, enrich=True)
+    
+    if st.session_state.goals is None:
+        st.session_state.goals = st.session_state.orc.explore_goals(st.session_state.summary, n_goals=10)
 
     st.write("## Summary")
-    summary = orc.summarize(selected_dataset, enrich=True)
+    if "description" in st.session_state.summary:
+        st.write(st.session_state.summary["description"])
 
-    if "description" in summary:
-        st.write(summary["description"])
+    if "fields" in st.session_state.summary:
+        st.write(st.session_state.summary["fields"])
 
-    if "fields" in summary:
-        st.write(summary["fields"])
+    # Display goals
+    st.sidebar.write("### Goal Exploration")
 
-    # Generate goals
-    if summary:
-        st.sidebar.write("### Goal Exploration")
+    num_goals = st.sidebar.slider(
+        "Number of goals to display",
+        min_value=1,
+        max_value=min(10, len(st.session_state.goals)),
+        value=min(4, len(st.session_state.goals)))
 
-        num_goals = st.sidebar.slider(
-            "Number of goals to generate",
-            min_value=1,
-            max_value=10,
-            value=4)
-        own_goal = st.sidebar.checkbox("Add Your Own Goal")
+    own_goal = st.sidebar.checkbox("Add Your Own Goal")
 
-        goals = orc.explore_goals(summary, n_goals=num_goals)
-        st.write(f"## Goals ({len(goals)})")
+    displayed_goals = st.session_state.goals[:num_goals]
+    
+    if own_goal:
+        user_goal = st.sidebar.text_input("Describe Your Goal")
+        if user_goal:
+            new_goal = {"question": user_goal, "visualization": user_goal}
+            displayed_goals.append(new_goal)
 
-        default_goal = goals[0]["question"]
-        goal_questions = [goal["question"] for goal in goals]
+    st.write(f"## Goals ({len(displayed_goals)})")
 
-        if own_goal:
-            user_goal = st.sidebar.text_input("Describe Your Goal")
+    goal_questions = [goal["question"] for goal in displayed_goals]
+    selected_goal = st.selectbox('Select a goal', options=goal_questions, index=st.session_state.selected_goal_index)
+    st.session_state.selected_goal_index = goal_questions.index(selected_goal)
 
-            if user_goal:
-                new_goal = {"question": user_goal, "visualization": user_goal}
-                goals.append(new_goal)
-                goal_questions.append(new_goal["question"])
+    st.write(displayed_goals[st.session_state.selected_goal_index]["question"])
 
-        selected_goal = st.selectbox('Select a goal', options=goal_questions, index=0)
+    # Generate visualizations
+    st.sidebar.write("## Visualization Library")
+    visualization_libraries = ["seaborn", "matplotlib", "plotly", "ggplot"]
 
-        selected_goal_index = goal_questions.index(selected_goal)
-        st.write(goals[selected_goal_index]["question"])
+    selected_library = st.sidebar.selectbox(
+        'Choose a visualization library',
+        options=visualization_libraries,
+        index=0
+    )
 
-        selected_goal_object = goals[selected_goal_index]
+    st.write("## Visualizations")
 
-        # Generate visualizations
-        if selected_goal_object:
-            st.sidebar.write("## Visualization Library")
-            visualization_libraries = ["seaborn", "matplotlib", "plotly", "ggplot"]
+    # Only generate visualizations if they don't exist or if the goal or library has changed
+    if (st.session_state.visualizations is None or 
+        st.session_state.get('last_goal_index') != st.session_state.selected_goal_index or
+        st.session_state.get('last_library') != selected_library):
+        
+        st.session_state.visualizations = st.session_state.orc.visualize(
+            summary=st.session_state.summary,
+            goal=displayed_goals[st.session_state.selected_goal_index],
+            library=selected_library)
+        
+        st.session_state.last_goal_index = st.session_state.selected_goal_index
+        st.session_state.last_library = selected_library
 
-            selected_library = st.sidebar.selectbox(
-                'Choose a visualization library',
-                options=visualization_libraries,
-                index=0
-            )
+    if st.session_state.visualizations:
+        selected_viz = st.session_state.visualizations[0]
 
-            st.write("## Visualizations")
+        if selected_viz.raster:
+            from PIL import Image
+            import io
+            import base64
 
-            visualizations = orc.visualize(
-                summary=summary,
-                goal=selected_goal_object,
-                library=selected_library)
+            imgdata = base64.b64decode(selected_viz.raster)
+            img = Image.open(io.BytesIO(imgdata))
+            st.image(img, use_column_width=True)
 
-            selected_viz = visualizations[0]
-
-            if selected_viz.raster:
-                from PIL import Image
-                import io
-                import base64
-
-                imgdata = base64.b64decode(selected_viz.raster)
-                img = Image.open(io.BytesIO(imgdata))
-                st.image(img, use_column_width=True)
-
-            st.write("### Visualization Code")
-            st.code(selected_viz.code)
+        st.write("### Visualization Code")
+        st.code(selected_viz.code)
