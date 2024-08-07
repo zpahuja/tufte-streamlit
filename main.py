@@ -45,6 +45,7 @@ if openai_key:
     datasets = [
         {"label": "Select a dataset", "url": None},
         {"label": "Cars", "url": "https://raw.githubusercontent.com/uwdata/draco/master/data/cars.csv"},
+        {"label": "Weather", "url": "https://raw.githubusercontent.com/uwdata/draco/master/data/weather.json"},
     ]
 
     selected_dataset_label = st.sidebar.selectbox(
